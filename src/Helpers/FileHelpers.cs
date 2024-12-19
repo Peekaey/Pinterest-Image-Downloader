@@ -25,11 +25,8 @@ public class FileHelpers : IFileHelpers
         return ImageQualityMap.Values.ToList();
     }
 
-    public string CreateDownloadFolder(string folderPath)
+    public string CreateDownloadFolder(string folderPath, string folderName)
     {
-
-        folderPath = GetRootProjectDirectory();
-        var folderName = "Downloads";
         var entireFolderPath = Path.Combine(folderPath, folderName);
         if (!Directory.Exists(entireFolderPath))
         {
@@ -48,7 +45,7 @@ public class FileHelpers : IFileHelpers
         return Path.GetFileNameWithoutExtension(imageUrl);
     }
     
-    private string GetRootProjectDirectory()
+    public string GetRootProjectDirectory()
     {
         // https://stackoverflow.com/a/11882118
         // This will get the current WORKING directory (i.e. \bin\Debug)

@@ -82,8 +82,6 @@ public class ParsingService : IParsingService
             throw new ArgumentNullException(nameof(webPageContent), "The web page content cannot be null.");
         }
         
-        var boardDivContainerCssSelector = ConfigurationManager.AppSettings["BoardDivContainerCSSSelector"];
-
         // Hash Set to Ensure Uniqueness
         var srcValues = new HashSet<string>(); 
         
@@ -107,5 +105,73 @@ public class ParsingService : IParsingService
 
         return srcValues;
     }
-    
+
+    public IEnumerable<string> GetAllBoardUrlsFromProfileByUrlStringQuery(string webPageContent, string username)
+    {
+        if (webPageContent == null)
+        {
+            throw new ArgumentNullException(nameof(webPageContent), "The web page content cannot be null.");
+        }
+
+        var usernamePattern = @"href=[""']\/([^\/]+)\/[^""']*[""']";
+
+        var usernameMatches = new HashSet<string>();
+
+        // Filter for valid href element
+        var initialMatches = Regex.Matches(webPageContent, usernamePattern);
+        
+        // Filter if Url Contains username
+        foreach (Match match in initialMatches)
+        {
+            var url = match.Value;
+            if (url.Contains(username))
+            {
+                if (!url.Contains("_saved") && !url.Contains("_created") && !url.Equals($"href=\"/{username}/\""))
+                {
+                    // Append Pinterest URL to front of the url
+                    url = "https://www.pinterest.com" + url.Substring(6, url.Length - 7);
+                    usernameMatches.Add(url);
+                }
+            }
+        }
+        
+        
+        
+
+        return usernameMatches;
+    }
+
+    public string GetUserNameFromUserUrl(string profileUrl)
+    {
+        var usernamePattern = @"https?:\/\/(?:[a-z]{2}\.)?pinterest\.com\/([^\/]+)\/";
+        
+        var usernameMatch = Regex.Match(profileUrl, usernamePattern);
+        
+        if (usernameMatch.Success)
+        {
+            return usernameMatch.Groups[1].Value.ToLower();
+        }
+        else
+        {
+            throw new ArgumentException("Unable to Get Profile URL");
+        }
+        
+    }
+
+    public string GetBoardNameFromUrl(string boardUrl)
+    {
+        var boardNamePattern = @"https?:\/\/(?:[a-z]{2}\.|www\.)?pinterest\.com\/[^\/]+\/([^\/]+)\/";
+
+        
+        var boardNameMatch = Regex.Match(boardUrl, boardNamePattern);
+        
+        if (boardNameMatch.Success)
+        {
+            return boardNameMatch.Groups[1].Value;
+        }
+        else
+        {
+            throw new ArgumentException("Unable to Get Board Name");
+        }
+    }
 }

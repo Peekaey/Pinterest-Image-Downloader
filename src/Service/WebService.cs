@@ -46,20 +46,25 @@ public class WebService : IWebService
             throw;
         }
     }
-
-    public async Task<List<PinterestFile>> DownloadBoardPinsJob(IEnumerable<string> pins)
+    
+    public async Task<List<PinterestFile>> DownloadBoardPinsJob(IEnumerable<string> pins, string parentDownloadFolder, string boardName)
     {
         // TODO Implement More Robust Exponential Backoff
         // 3 Seconds
         var delayTimer = 3000;
         var maxRetryAttempts = 3;
         var pinCount = 0;
+        
+        // TODO - Allow for Folder Path Selection
+        // Temp for Now
+        var folderPath = _fileHelpers.GetRootProjectDirectory();
+        var downloadFolder = _fileHelpers.CreateDownloadFolder(parentDownloadFolder, boardName);
         List<PinterestFile> failedDownloads = new List<PinterestFile>();
         try
         {
             foreach (var pin in pins)
             {
-                var pinParentParentTaskResult = await DownloadPinParentTask(pin, pinCount);
+                var pinParentParentTaskResult = await DownloadPinParentTask(pin, pinCount, downloadFolder);
 
                 // Forbidden Error in the case of direct image url is invalid
                 // != Forbidden likely implies rate limiting at this stage
@@ -69,7 +74,7 @@ public class WebService : IWebService
                     
                     for (int i = 0; i < maxRetryAttempts; i++)
                     {
-                        var pinRetryDownloadResult = await DownloadPinParentTask(pin, pinCount);
+                        var pinRetryDownloadResult = await DownloadPinParentTask(pin, pinCount, downloadFolder);
                         if (pinRetryDownloadResult.IsSuccess)
                         {
                             break;
@@ -100,9 +105,9 @@ public class WebService : IWebService
         return failedDownloads;
     }
     
-    private async Task<ServiceResult> DownloadPinParentTask(string imageUrl, int pinCount)
+    private async Task<ServiceResult> DownloadPinParentTask(string imageUrl, int pinCount, string downloadFolder)
     {
-        var downloadFolder = _fileHelpers.CreateDownloadFolder("tmpFolderPath");
+
         var downloadResult = await DownloadPinTask(imageUrl, downloadFolder, pinCount);
         
         if (downloadResult.IsSuccess)
@@ -116,6 +121,7 @@ public class WebService : IWebService
     private async Task<ServiceResult> DownloadPinTask(string imageUrl, string downloadFolder, int pinCount)
     {
         // Cycle Through Each Quality To eventually download an image
+        // TODO Refactor and Move Up the Call Stack To Reduce amount of calls
         var imageQualityLevels = _fileHelpers.GetAllImageQualityLevels();
         var lastErrorMessage = string.Empty;
         
@@ -177,9 +183,10 @@ public class WebService : IWebService
         }
     }
 
-    public async Task<string> GetStatefulWebPageContent(string boardUrl) { 
-        // TODO Move to app.config instead of hardcoding
-        var moreLikeThisCSSSelector = ".qQp > div:nth-child(1) > div:nth-child(1) > h2:nth-child(1)"; // Selector to stop scrolling
+    // Used To Get Board Content
+    public async Task<string> GetStatefulWebPageContent(string boardUrl, string cssSelector) { 
+
+        // NGL - Kind of Spaghetti code but works quite well for now
         try
         {
             var playwright = await Playwright.CreateAsync();
@@ -192,22 +199,14 @@ public class WebService : IWebService
             var capturedContent = new HashSet<string>(); // Store unique HTML snapshots
             int previousContentLength = 0; // Track changes in the DOM content length
             int scrollStep = 500; // Scroll step size (pixels)
-            int maxScrollAttempts = 50; // Max scroll attempts to avoid infinite loops
-            int scrollAttempts = 0;
 
             while (true)
             {
-                // TODO Redundant Code -- Remove associated
-                scrollAttempts++;
-                if (scrollAttempts > maxScrollAttempts)
-                {
-                    break;
-                }
-
+                
                 // Check if the "More Like This" section is visible
-                if (await page.Locator(moreLikeThisCSSSelector).IsVisibleAsync())
+                if (await page.Locator(cssSelector).IsVisibleAsync())
                 {
-                    Console.WriteLine($"Selector '{moreLikeThisCSSSelector}' is visible. Stopping scroll.");
+                    Console.WriteLine($"Selector '{cssSelector}' is visible. Stopping scroll.");
                     break;
                 }
 
@@ -239,6 +238,71 @@ public class WebService : IWebService
             // var context = BrowsingContext.New(Configuration.Default);
             // var parser = context.GetService<IHtmlParser>();
             // var document = await parser.ParseDocumentAsync(combinedContent);
+            return combinedContent;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error Fetching Web Content: " + ex.Message);
+            return string.Empty;
+        }
+    }
+    
+    public async Task<string> GetStatefulProfileWebPageContent(string boardUrl, string cssSelector)
+    {
+        try
+        {
+            var playwright = await Playwright.CreateAsync();
+            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+            var page = await browser.NewPageAsync();
+
+            await page.GotoAsync(boardUrl);
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+            var capturedContent = new List<string>(); // Store unique HTML snapshots
+            int previousContentLength = 0; // Track changes in the DOM content length
+            int scrollStep = 500; // Scroll step size (pixels)
+
+            while (true)
+            {
+                // Capture current page content
+                var currentContent = await page.ContentAsync();
+                capturedContent.Add(currentContent);
+
+                // Check if the "More Like This" section is visible
+                if (await page.Locator(cssSelector).IsVisibleAsync())
+                {
+                    Console.WriteLine($"Selector '{cssSelector}' is visible. Capturing additional content before stopping scroll.");
+
+                    // Scroll 3 more times and capture content after each scroll
+                    for (int i = 0; i < 4; i++)
+                    {
+                        await page.EvaluateAsync($"window.scrollBy(0, {scrollStep});");
+                        await page.WaitForTimeoutAsync(1500); // Allow time for new content to load
+                        currentContent = await page.ContentAsync();
+                        capturedContent.Add(currentContent);
+                    }
+
+                    break; // Exit the loop after scrolling 3 more times
+                }
+
+                // Scroll the page down incrementally
+                await page.EvaluateAsync($"window.scrollBy(0, {scrollStep});");
+                await page.WaitForTimeoutAsync(1000); // Wait to ensure new content loads
+
+                // Check if new content has been loaded by comparing DOM length
+                int currentContentLength = currentContent.Length;
+                if (currentContentLength == previousContentLength)
+                {
+                    Console.WriteLine("No new content detected. Stopping scroll.");
+                    break; // Stop scrolling if the content hasn't changed
+                }
+                previousContentLength = currentContentLength;
+            }
+
+            // Combine all captured HTML content into a single structure
+            var combinedContent = $"<html><body>{string.Join("\n", capturedContent)}</body></html>";
+            await browser.CloseAsync();
+
             return combinedContent;
         }
         catch (Exception ex)

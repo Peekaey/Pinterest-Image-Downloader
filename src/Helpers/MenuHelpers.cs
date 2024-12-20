@@ -52,7 +52,7 @@ public class MenuHelpers : IMenuHelper
       }
       else
       {
-         AnsiConsole.WriteLine($"{downloadResult.Count} pins failed to download. Printing list...");
+         AnsiConsole.WriteLine($"{downloadResult.Count} pins completely failed to download. Printing list...");
          foreach (var pin in downloadResult)
          {
             AnsiConsole.WriteLine("Failed to download pin: " + pin.FileUrl);
@@ -66,6 +66,7 @@ public class MenuHelpers : IMenuHelper
    private async Task<ServiceResult> ExecuteDownloadAllBoards(string url, string parentDownloadFolder)
    {
       var endContentCSSSelector = ConfigurationManager.AppSettings["ProfileMoreIdeasCSSSelector"]; // Selector to stop scrolling
+      
       var profileStatefulWebPageContent = await _webService.GetStatefulProfileWebPageContent(url, endContentCSSSelector);
       var username = _parsingService.GetUserNameFromUserUrl(url);
       var boardUrls = _parsingService.GetAllBoardUrlsFromProfileByUrlStringQuery(profileStatefulWebPageContent, username).ToList();
@@ -80,6 +81,8 @@ public class MenuHelpers : IMenuHelper
          }
       }
 
+      // TODO
+      // Fix validation or remove it
       if (boardsWithErrors.Count > 0)
       {
          AnsiConsole.WriteLine("The following boards failed to download:");

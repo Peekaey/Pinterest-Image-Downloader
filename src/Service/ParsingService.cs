@@ -9,6 +9,8 @@ namespace Pinterest_Image_Downloader.Service;
 public class ParsingService : IParsingService
 {
     
+    // Outdated
+    // Used for Parsing with AngleSharp
     public IEnumerable<string> GetAllBoardPinIds(IDocument webPageContent)
     {
         var boardDivContainerCssSelector = ConfigurationManager.AppSettings["boardDivContainerCssSelector"];
@@ -35,6 +37,7 @@ public class ParsingService : IParsingService
     }
 
     // Outdated
+    // Used for Parsing with AngleSharp
     public IEnumerable<string> GetAllBoardContentUrlsByCssQuery(IDocument webPageContent)
     {
         var boardImgCssSelector = ConfigurationManager.AppSettings["BoardImgCSSSelector"];
@@ -74,7 +77,7 @@ public class ParsingService : IParsingService
         return srcValues;
     }
     
-    // TODO Tidy Code
+
     public IEnumerable<string> GetAllBoardContentUrlsByUrlStringQuery(string webPageContent)
     {
         if (webPageContent == null)
@@ -82,28 +85,28 @@ public class ParsingService : IParsingService
             throw new ArgumentNullException(nameof(webPageContent), "The web page content cannot be null.");
         }
         
-        // Hash Set to Ensure Uniqueness
-        var srcValues = new HashSet<string>(); 
+        var extractedUrls = new HashSet<string>(); 
         
-        var urlPattern = @"https:\/\/i\.pinimg\.com\/[^\s\""<>]+";
+        // Redundant using two different patterns as its unnecessary calls, however two pattern matchings help with debugging
+        var basePattern = @"https:\/\/i\.pinimg\.com\/[^\s\""<>]+";
+        var validUrlPattern = @"https:\/\/i\.pinimg\.com\/[^\/]+\/[^\/]+\/[^\/]+\/[^\/]+\/[^\/]+\.(jpg|jpeg|png|gif)";         
+        
 
-        // Match all Pin Img URLs
-        var matches = System.Text.RegularExpressions.Regex.Matches(webPageContent, urlPattern);
-
-        // Add each unique URL to the HashSet
+        // Match all potential image URLs in the content
+        var matches = Regex.Matches(webPageContent, basePattern);
+        
         foreach (var match in matches)
         {
             var url = match.ToString();
             
-            // Regex Pattern Match so that it matches Downloadable Pins Part Of The Board Only
-            var validUrlPattern = @"https:\/\/i\.pinimg\.com\/[^\/]+\/[^\/]+\/[^\/]+\/[^\/]+\/[^\/]+\.(jpg|jpeg|png|gif)";            // var validUrlPattern = @"https:\/\/i\.pinimg\.com\/";
+            // Ensure the URL matches the valid image pattern
             if (Regex.IsMatch(url, validUrlPattern))
             {
-                srcValues.Add(url);
+                extractedUrls.Add(url);
             }
         }
 
-        return srcValues;
+        return extractedUrls;
     }
 
     public IEnumerable<string> GetAllBoardUrlsFromProfileByUrlStringQuery(string webPageContent, string username)
@@ -112,12 +115,16 @@ public class ParsingService : IParsingService
         {
             throw new ArgumentNullException(nameof(webPageContent), "The web page content cannot be null.");
         }
+        
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            throw new ArgumentException("Username cannot be null or empty.", nameof(username));
+        }
 
+        var boardUrls = new HashSet<string>();
         var usernamePattern = @"href=[""']\/([^\/]+)\/[^""']*[""']";
-
-        var usernameMatches = new HashSet<string>();
-
-        // Filter for valid href element
+        
+        // Find all matches for hrefs in the web page content
         var initialMatches = Regex.Matches(webPageContent, usernamePattern);
         
         // Filter if Url Contains username
@@ -130,21 +137,16 @@ public class ParsingService : IParsingService
                 {
                     // Append Pinterest URL to front of the url
                     url = "https://www.pinterest.com" + url.Substring(6, url.Length - 7);
-                    usernameMatches.Add(url);
+                    boardUrls.Add(url);
                 }
             }
         }
-        
-        
-        
-
-        return usernameMatches;
+        return boardUrls;
     }
 
     public string GetUserNameFromUserUrl(string profileUrl)
     {
         var usernamePattern = @"https?:\/\/(?:[a-z]{2}\.)?pinterest\.com\/([^\/]+)\/";
-        
         var usernameMatch = Regex.Match(profileUrl, usernamePattern);
         
         if (usernameMatch.Success)
@@ -161,8 +163,6 @@ public class ParsingService : IParsingService
     public string GetBoardNameFromUrl(string boardUrl)
     {
         var boardNamePattern = @"https?:\/\/(?:[a-z]{2}\.|www\.)?pinterest\.com\/[^\/]+\/([^\/]+)\/";
-
-        
         var boardNameMatch = Regex.Match(boardUrl, boardNamePattern);
         
         if (boardNameMatch.Success)

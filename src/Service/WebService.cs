@@ -60,11 +60,12 @@ public class WebService : IWebService
         var folderPath = _fileHelpers.GetRootProjectDirectory();
         var downloadFolder = _fileHelpers.CreateDownloadFolder(parentDownloadFolder, boardName);
         List<PinterestFile> failedDownloads = new List<PinterestFile>();
+        var imageQualityLevels = _fileHelpers.GetAllImageQualityLevels();
         try
         {
             foreach (var pin in pins)
             {
-                var pinParentParentTaskResult = await DownloadPinParentTask(pin, pinCount, downloadFolder);
+                var pinParentParentTaskResult = await DownloadPinParentTask(pin, pinCount, downloadFolder, imageQualityLevels);
 
                 // Forbidden Error in the case of direct image url is invalid
                 // != Forbidden likely implies rate limiting at this stage
@@ -74,7 +75,7 @@ public class WebService : IWebService
                     
                     for (int i = 0; i < maxRetryAttempts; i++)
                     {
-                        var pinRetryDownloadResult = await DownloadPinParentTask(pin, pinCount, downloadFolder);
+                        var pinRetryDownloadResult = await DownloadPinParentTask(pin, pinCount, downloadFolder, imageQualityLevels);
                         if (pinRetryDownloadResult.IsSuccess)
                         {
                             break;
@@ -105,10 +106,10 @@ public class WebService : IWebService
         return failedDownloads;
     }
     
-    private async Task<ServiceResult> DownloadPinParentTask(string imageUrl, int pinCount, string downloadFolder)
+    private async Task<ServiceResult> DownloadPinParentTask(string imageUrl, int pinCount, string downloadFolder, List<string> imageQualityLevels)
     {
 
-        var downloadResult = await DownloadPinTask(imageUrl, downloadFolder, pinCount);
+        var downloadResult = await DownloadPinTask(imageUrl, downloadFolder, pinCount, imageQualityLevels);
         
         if (downloadResult.IsSuccess)
         {
@@ -118,11 +119,9 @@ public class WebService : IWebService
         }
     }
 
-    private async Task<ServiceResult> DownloadPinTask(string imageUrl, string downloadFolder, int pinCount)
+    private async Task<ServiceResult> DownloadPinTask(string imageUrl, string downloadFolder, int pinCount, List<string> imageQualityLevels)
     {
         // Cycle Through Each Quality To eventually download an image
-        // TODO Refactor and Move Up the Call Stack To Reduce amount of calls
-        var imageQualityLevels = _fileHelpers.GetAllImageQualityLevels();
         var lastErrorMessage = string.Empty;
         
         foreach (var imageLevel in imageQualityLevels)
@@ -184,9 +183,10 @@ public class WebService : IWebService
     }
 
     // Used To Get Board Content
-    public async Task<string> GetStatefulWebPageContent(string boardUrl, string cssSelector) { 
+    // NGL - Kind of Spaghetti code but works quite well for now
 
-        // NGL - Kind of Spaghetti code but works quite well for now
+    public async Task<string> GetStatefulWebPageContent(string boardUrl, string cssSelector) { 
+        
         try
         {
             var playwright = await Playwright.CreateAsync();
@@ -202,28 +202,36 @@ public class WebService : IWebService
 
             while (true)
             {
+                // Capture current page content
+                var currentContent = await page.ContentAsync();
+                capturedContent.Add(currentContent);
                 
                 // Check if the "More Like This" section is visible
                 if (await page.Locator(cssSelector).IsVisibleAsync())
                 {
                     Console.WriteLine($"Selector '{cssSelector}' is visible. Stopping scroll.");
+                    
+                    // Scroll 3 more times and capture content after each scroll
+                    for (int i = 0; i < 4; i++)
+                    {
+                        await page.EvaluateAsync($"window.scrollBy(0, {scrollStep});");
+                        await page.WaitForTimeoutAsync(1500); // Allow time for new content to load
+                        currentContent = await page.ContentAsync();
+                        capturedContent.Add(currentContent);
+                    }
                     break;
                 }
 
                 // Scroll the page down incrementally
                 await page.EvaluateAsync($"window.scrollBy(0, {scrollStep});");
                 await page.WaitForTimeoutAsync(1000); // Wait to ensure new content loads
-
-                // Capture current page content
-                var currentContent = await page.ContentAsync();
-                capturedContent.Add(currentContent);
-
+                
                 // Check if new content has been loaded by comparing DOM length
                 int currentContentLength = currentContent.Length;
                 if (currentContentLength == previousContentLength)
                 {
                     Console.WriteLine("No new content detected. Stopping scroll.");
-                    break; // Stop scrolling if the content hasn't changed
+                    break;
                 }
                 previousContentLength = currentContentLength;
             }
@@ -247,6 +255,8 @@ public class WebService : IWebService
         }
     }
     
+    // Used to get public boards from profile
+    // Spaghetti code as well
     public async Task<string> GetStatefulProfileWebPageContent(string boardUrl, string cssSelector)
     {
         try
@@ -282,7 +292,7 @@ public class WebService : IWebService
                         capturedContent.Add(currentContent);
                     }
 
-                    break; // Exit the loop after scrolling 3 more times
+                    break;
                 }
 
                 // Scroll the page down incrementally
@@ -294,7 +304,7 @@ public class WebService : IWebService
                 if (currentContentLength == previousContentLength)
                 {
                     Console.WriteLine("No new content detected. Stopping scroll.");
-                    break; // Stop scrolling if the content hasn't changed
+                    break;
                 }
                 previousContentLength = currentContentLength;
             }
@@ -302,7 +312,6 @@ public class WebService : IWebService
             // Combine all captured HTML content into a single structure
             var combinedContent = $"<html><body>{string.Join("\n", capturedContent)}</body></html>";
             await browser.CloseAsync();
-
             return combinedContent;
         }
         catch (Exception ex)

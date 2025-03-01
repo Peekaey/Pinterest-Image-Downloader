@@ -1,6 +1,6 @@
 # Pinterest-Image-Downloader
 
-.NET Console Application using Playwright to download entire images from Pinterest Boards
+Console Application using Playwright to download entire images from Pinterest Boards
 
 ### How It Works
 Application launches a playwright browser session to scroll and capture all data from a specified Pinterest board. It then extracts the image URLs and downloads them to the "Downloads" folder within the project.
